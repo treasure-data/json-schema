@@ -22,7 +22,7 @@ module JSON
           types
         )
 
-        validation_error(processor, message, fragments, current_schema, self, options[:record_errors])
+        validation_error(processor, message, fragments, current_schema, self, options[:record_errors], {types: types})
       end
     end
   end

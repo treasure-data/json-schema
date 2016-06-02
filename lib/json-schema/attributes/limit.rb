@@ -10,7 +10,8 @@ module JSON
         property    = build_fragment(fragments)
         description = error_message(schema)
         message = format("The property '%s' %s", property, description)
-        validation_error(processor, message, fragments, current_schema, self, options[:record_errors])
+        details = {count: limit(schema), modifier: exclusive?(schema) ? "exclusive" : nil}
+        validation_error(processor, message, fragments, current_schema, self, options[:record_errors], details)
       end
 
       def self.invalid?(schema, data)

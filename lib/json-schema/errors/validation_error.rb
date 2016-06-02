@@ -4,12 +4,13 @@ module JSON
       INDENT = "    "
       attr_accessor :fragments, :schema, :failed_attribute, :sub_errors, :message
 
-      def initialize(message, fragments, failed_attribute, schema)
+      def initialize(message, fragments, failed_attribute, schema, details=nil)
         @fragments = fragments.clone
         @schema = schema
         @sub_errors = {}
         @failed_attribute = failed_attribute
         @message = message
+        @details = details
         super(message_with_schema)
       end
 
@@ -27,7 +28,7 @@ module JSON
       end
 
       def to_hash
-        base = {:schema => @schema.uri, :fragment => ::JSON::Schema::Attribute.build_fragment(fragments), :message => message_with_schema, :failed_attribute => @failed_attribute.to_s.split(":").last.split("Attribute").first}
+        base = {:schema => @schema.uri, :fragment => ::JSON::Schema::Attribute.build_fragment(fragments), :message => message_with_schema, :failed_attribute => @failed_attribute.to_s.split(":").last.split("Attribute").first, :details => @details}
         if !@sub_errors.empty?
           base[:errors] = @sub_errors.inject({}) do |hsh, (subschema, errors)|
             subschema_sym = subschema.downcase.gsub(/\W+/, '_').to_sym
