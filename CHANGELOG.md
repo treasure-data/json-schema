@@ -5,6 +5,14 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Made sure we really do clear the cache when instructed to
+- It's now possible to use reserved words in property names
+- Removed support for setting "extends" to a string (it's invalid json-schema - use a "$ref" instead)
+
+### Changed
+- Made all `validate*` methods on `JSON::Validator` ultimately call `validate!`
+
 ## [2.6.2] - 2016-05-13
 
 ### Fixed
