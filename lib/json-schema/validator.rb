@@ -18,7 +18,7 @@ module JSON
   class Validator
 
     @@schemas = {}
-    @@cache_schemas = false
+    @@cache_schemas = true
     @@default_opts = {
       :list => false,
       :version => nil,
@@ -26,7 +26,7 @@ module JSON
       :record_errors => false,
       :errors_as_objects => false,
       :insert_defaults => false,
-      :clear_cache => true,
+      :clear_cache => false,
       :strict => false,
       :parse_data => true
     }
@@ -48,7 +48,7 @@ module JSON
       @validation_options = @options[:record_errors] ? {:record_errors => true} : {}
       @validation_options[:insert_defaults] = true if @options[:insert_defaults]
       @validation_options[:strict] = true if @options[:strict] == true
-      @validation_options[:clear_cache] = false if @options[:clear_cache] == false
+      @validation_options[:clear_cache] = true if !@@cache_schemas || @options[:clear_cache]
 
       @@mutex.synchronize { @base_schema = initialize_schema(schema_data) }
       @original_data = data
@@ -62,8 +62,7 @@ module JSON
         end
         metaschema = base_validator ? base_validator.metaschema : validator.metaschema
         # Don't clear the cache during metaschema validation!
-        meta_validator = JSON::Validator.new(metaschema, @base_schema.schema, {:clear_cache => false})
-        meta_validator.validate
+        self.class.validate!(metaschema, @base_schema.schema, {:clear_cache => false})
       end
 
       # If the :fragment option is set, try and validate against the fragment
@@ -110,12 +109,17 @@ module JSON
     end
 
     # Run a simple true/false validation of data against a schema
-    def validate()
+    def validate
       @base_schema.validate(@data,[],self,@validation_options)
-      if @options[:errors_as_objects]
-        return @errors.map{|e| e.to_hash}
+
+      if @options[:record_errors]
+        if @options[:errors_as_objects]
+          @errors.map{|e| e.to_hash}
+        else
+          @errors.map{|e| e.to_string}
+        end
       else
-        return @errors.map{|e| e.to_string}
+        true
       end
     ensure
       if @validation_options[:clear_cache] == true
@@ -127,23 +131,15 @@ module JSON
     end
 
     def load_ref_schema(parent_schema, ref)
-      schema_uri = absolutize_ref_uri(ref, parent_schema.uri)
+      schema_uri = JSON::Util::URI.absolutize_ref(ref, parent_schema.uri)
       return true if self.class.schema_loaded?(schema_uri)
+
+      validator = self.class.validator_for_uri(schema_uri, false)
+      schema_uri = JSON::Util::URI.file_uri(validator.metaschema) if validator
 
       schema = @options[:schema_reader].read(schema_uri)
       self.class.add_schema(schema)
       build_schemas(schema)
-    end
-
-    def absolutize_ref_uri(ref, parent_schema_uri)
-      ref_uri = JSON::Util::URI.strip_fragment(ref)
-
-      return ref_uri if ref_uri.absolute?
-      # This is a self reference and thus the schema does not need to be re-loaded
-      return parent_schema_uri if ref_uri.path.empty?
-
-      uri = JSON::Util::URI.strip_fragment(parent_schema_uri.dup)
-      Util::URI.normalized_uri(uri.join(ref_uri.path))
     end
 
     # Build all schemas with IDs, mapping out the namespace
@@ -239,9 +235,7 @@ module JSON
     class << self
       def validate(schema, data,opts={})
         begin
-          validator = JSON::Validator.new(schema, data, opts)
-          validator.validate
-          return true
+          validate!(schema, data, opts)
         rescue JSON::Schema::ValidationError, JSON::Schema::SchemaError
           return false
         end
@@ -258,7 +252,6 @@ module JSON
       def validate!(schema, data,opts={})
         validator = JSON::Validator.new(schema, data, opts)
         validator.validate
-        return true
       end
       alias_method 'validate2', 'validate!'
 
@@ -271,9 +264,7 @@ module JSON
       end
 
       def fully_validate(schema, data, opts={})
-        opts[:record_errors] = true
-        validator = JSON::Validator.new(schema, data, opts)
-        validator.validate
+        validate!(schema, data, opts.merge(:record_errors => true))
       end
 
       def fully_validate_schema(schema, opts={})
@@ -299,7 +290,8 @@ module JSON
       end
 
       def clear_cache
-        @@schemas = {} if @@cache_schemas == false
+        @@schemas = {}
+        JSON::Util::URI.clear_cache
       end
 
       def schemas
@@ -338,28 +330,34 @@ module JSON
         @@default_validator
       end
 
-      def validator_for_uri(schema_uri)
+      def validator_for_uri(schema_uri, raise_not_found=true)
         return default_validator unless schema_uri
         u = JSON::Util::URI.parse(schema_uri)
         validator = validators["#{u.scheme}://#{u.host}#{u.path}"]
-        if validator.nil?
+        if validator.nil? && raise_not_found
           raise JSON::Schema::SchemaError.new("Schema not found: #{schema_uri}")
         else
           validator
         end
       end
 
-      def validator_for_name(schema_name)
+      def validator_for_name(schema_name, raise_not_found=true)
         return default_validator unless schema_name
-        validator = validators_for_names([schema_name]).first
-        if validator.nil?
+        schema_name = schema_name.to_s
+        validator = validators.values.detect do |v|
+          Array(v.names).include?(schema_name)
+        end
+        if validator.nil? && raise_not_found
           raise JSON::Schema::SchemaError.new("The requested JSON schema version is not supported")
         else
           validator
         end
       end
 
-      alias_method :validator_for, :validator_for_uri
+      def validator_for(schema_uri)
+        warn "[DEPRECATION NOTICE] JSON::Validator#validator_for has been replaced by JSON::Validator#validator_for_uri and will be removed in version >= 3. Please use the #validator_for_uri method instead."
+        validator_for_uri(schema_uri)
+      end
 
       def register_validator(v)
         @@validators["#{v.uri.scheme}://#{v.uri.host}#{v.uri.path}"] = v
@@ -371,19 +369,22 @@ module JSON
 
       def register_format_validator(format, validation_proc, versions = ["draft1", "draft2", "draft3", "draft4", nil])
         custom_format_validator = JSON::Schema::CustomFormat.new(validation_proc)
-        validators_for_names(versions).each do |validator|
+        versions.each do |version|
+          validator = validator_for_name(version)
           validator.formats[format.to_s] = custom_format_validator
         end
       end
 
       def deregister_format_validator(format, versions = ["draft1", "draft2", "draft3", "draft4", nil])
-        validators_for_names(versions).each do |validator|
+        versions.each do |version|
+          validator = validator_for_name(version)
           validator.formats[format.to_s] = validator.default_formats[format.to_s]
         end
       end
 
       def restore_default_formats(versions = ["draft1", "draft2", "draft3", "draft4", nil])
-        validators_for_names(versions).each do |validator|
+        versions.each do |version|
+          validator = validator_for_name(version)
           validator.formats = validator.default_formats.clone
         end
       end
@@ -486,22 +487,6 @@ module JSON
           @@serializer = lambda{|o| JSON.dump(o) }
         else
           @@serializer = lambda{|o| YAML.dump(o) }
-        end
-      end
-
-      private
-
-      def validators_for_names(names)
-        names = names.map { |name| name.to_s }
-        [].tap do |memo|
-          validators.each do |_, validator|
-            if (validator.names & names).any?
-              memo << validator
-            end
-          end
-          if names.include?('')
-            memo << default_validator
-          end
         end
       end
     end

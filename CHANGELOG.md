@@ -5,6 +5,27 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Made the `:clear_cache` option for `validate` also clear the URI parse cache
+- Moved `JSON::Validator.absolutize_ref` and the ref manipulating code in
+  `JSON::Schema::RefAttribute` into `JSON::Util::URI`
+- Deprecated `JSON::Validator#validator_for` in favor of `JSON::Validator#validator_for_uri`
+
+## [2.7.0] - 2016-09-29
+
+### Fixed
+- Made sure we really do clear the cache when instructed to
+- It's now possible to use reserved words in property names
+- Removed support for setting "extends" to a string (it's invalid json-schema - use a "$ref" instead)
+- Relaxed 'items' and 'allowedItems' validation to permit arrays to pass even
+  when they contain fewer elements than the 'items' array.  To require full tuples,
+  use 'minItems'.
+
+### Changed
+- Made all `validate*` methods on `JSON::Validator` ultimately call `validate!`
+- Updated addressable dependency to 2.4.0
+- Attached failed `uri` or `pathname` to read errors for more meaning
+
 ## [2.6.2] - 2016-05-13
 
 ### Fixed
